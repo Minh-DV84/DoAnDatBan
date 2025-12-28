@@ -263,3 +263,19 @@ GO
 
 PRINT 'DB DoAnDatBan created and initialized successfully.';
 GO
+ 
+
+
+ 
+---- them moi mat khau admin ban dau ---- 
+
+DECLARE @Username NVARCHAR(50) = N'admin';
+DECLARE @NewPassword NVARCHAR(200) = N'123456';
+DECLARE @NewSalt NVARCHAR(64) = CONVERT(NVARCHAR(64), NEWID());
+
+UPDATE dbo.AdminUsers
+SET PasswordSalt = @NewSalt,
+    PasswordHash = HASHBYTES('SHA2_256', @NewPassword + @NewSalt),
+    IsActive = 1
+WHERE Username = @Username;
+
