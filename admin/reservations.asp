@@ -7,91 +7,82 @@ Response.Charset  = "utf-8"
 <!--#include file="../includes/connect.asp" -->
 
 <%
-Dim q, status, d
-q = Trim(Request.QueryString("q") & "")
-status = Trim(Request.QueryString("status") & "")
-d = Trim(Request.QueryString("date") & "") ' yyyy-mm-dd
+' -------------------------
+' Filters
+' -------------------------
+Dim fDate, fStatus, fSlot
+fDate   = Trim(Request.QueryString("d") & "")
+fStatus = Trim(Request.QueryString("st") & "")
+fSlot   = Trim(Request.QueryString("slot") & "")
 
-' validate status (chỉ cho 4 giá trị)
-Dim statusOk
-statusOk = False
-If status <> "" Then
-    Select Case LCase(status)
-        Case "pending", "confirmed", "cancelled", "completed"
-            statusOk = True
-        Case Else
-            statusOk = False
-    End Select
-End If
+Dim slotId : slotId = 0
+If IsNumeric(fSlot) Then slotId = CLng(fSlot)
 
-' validate date dạng yyyy-mm-dd (check đơn giản)
-Function IsYmdDate(s)
-    s = Trim(s & "")
-    If Len(s) <> 10 Then IsYmdDate = False : Exit Function
-    If Mid(s,5,1) <> "-" Or Mid(s,8,1) <> "-" Then IsYmdDate = False : Exit Function
-    If Not IsNumeric(Replace(s, "-", "")) Then IsYmdDate = False : Exit Function
-    IsYmdDate = True
-End Function
+' Load TimeSlots for dropdown
+Dim rsSlots
+Set rsSlots = conn.Execute("SELECT SlotId, SlotName FROM dbo.TimeSlots ORDER BY SlotId ASC")
 
-Dim cmd, rs, sql, whereSql
+' Build list query
+Dim sql, cmd, rs
+sql = ""
+sql = sql & "SELECT TOP 200 "
+sql = sql & " r.ReservationId, r.FullName, r.Phone, r.Email, r.Guests, r.ReservationDate, r.SlotId, r.Status, r.CreatedAt, "
+sql = sql & " ts.SlotName, a.AreaName, t.TableName, t.Capacity "
+sql = sql & "FROM dbo.Reservations r "
+sql = sql & "LEFT JOIN dbo.TimeSlots ts ON ts.SlotId = r.SlotId "
+sql = sql & "LEFT JOIN dbo.ReservationTables rt ON rt.ReservationId = r.ReservationId "
+sql = sql & "LEFT JOIN dbo.DiningTables t ON t.TableId = rt.TableId "
+sql = sql & "LEFT JOIN dbo.Areas a ON a.AreaId = t.AreaId "
+sql = sql & "WHERE 1=1 "
+
 Set cmd = Server.CreateObject("ADODB.Command")
 Set cmd.ActiveConnection = conn
 cmd.CommandType = 1 ' adCmdText
 
-whereSql = " WHERE 1=1 "
-
-' Filter q: tìm theo SĐT hoặc tên (LIKE)
-If q <> "" Then
-    whereSql = whereSql & " AND (r.Phone LIKE ? OR r.FullName LIKE ?) "
-    cmd.Parameters.Append cmd.CreateParameter("@qPhone", 202, 1, 30, "%" & q & "%")
-    cmd.Parameters.Append cmd.CreateParameter("@qName", 202, 1, 120, "%" & q & "%")
+' Apply filters with parameters (?)
+If fDate <> "" Then
+    sql = sql & " AND CAST(r.ReservationDate AS date) = CONVERT(date, ?, 23) "
+    cmd.Parameters.Append cmd.CreateParameter("@d", 202, 1, 10, fDate) ' yyyy-mm-dd
 End If
 
-' Filter status
-If statusOk Then
-    whereSql = whereSql & " AND r.Status = ? "
-    ' Lưu status đúng dạng chữ cái đầu (tuỳ DB bạn lưu)
-    ' Ở đây mình chuẩn hoá: Pending/Confirmed/Cancelled/Completed
-    Dim stNorm
-    Select Case LCase(status)
-        Case "pending":   stNorm = "Pending"
-        Case "confirmed": stNorm = "Confirmed"
-        Case "cancelled": stNorm = "Cancelled"
-        Case "completed": stNorm = "Completed"
-    End Select
-    cmd.Parameters.Append cmd.CreateParameter("@status", 202, 1, 20, stNorm)
+If fStatus <> "" Then
+    sql = sql & " AND r.Status = ? "
+    cmd.Parameters.Append cmd.CreateParameter("@st", 202, 1, 20, fStatus)
 End If
 
-' Filter date
-If d <> "" And IsYmdDate(d) Then
-    whereSql = whereSql & " AND r.ReservationDate = CONVERT(date, ?, 23) "
-    cmd.Parameters.Append cmd.CreateParameter("@date", 202, 1, 10, d)
+If slotId > 0 Then
+    sql = sql & " AND r.SlotId = ? "
+    cmd.Parameters.Append cmd.CreateParameter("@slot", 3, 1, , CLng(slotId))
 End If
 
-sql = ""
-sql = sql & "SELECT TOP 200 "
-sql = sql & "  r.ReservationId, r.FullName, r.Phone, r.Email, r.Guests, "
-sql = sql & "  r.ReservationDate, r.SlotId, ts.SlotName, ts.SortOrder, "
-sql = sql & "  r.Status, r.CreatedAt "
-sql = sql & "FROM dbo.Reservations r "
-sql = sql & "LEFT JOIN dbo.TimeSlots ts ON r.SlotId = ts.SlotId "
-sql = sql & whereSql
-sql = sql & "ORDER BY r.ReservationDate DESC, ISNULL(ts.SortOrder, 999), r.ReservationId DESC;"
+sql = sql & " ORDER BY r.ReservationDate DESC, r.SlotId ASC, r.ReservationId DESC;"
 
 cmd.CommandText = sql
-
-On Error Resume Next
 Set rs = cmd.Execute
-If Err.Number <> 0 Then
-    Dim errDesc
-    errDesc = Err.Description & ""
-    On Error GoTo 0
-    conn.Close : Set conn = Nothing
-    Response.Write "<h3>Lỗi truy vấn danh sách đơn</h3>"
-    Response.Write "<pre>" & Server.HTMLEncode(errDesc) & "</pre>"
-    Response.End
-End If
-On Error GoTo 0
+
+Function HE(x): HE = Server.HTMLEncode(x & ""): End Function
+
+Function BadgeClass(st)
+    Dim s: s = LCase(Trim(st & ""))
+    BadgeClass = "badge"
+    If s="pending"   Then BadgeClass = "badge b-pending"
+    If s="confirmed" Then BadgeClass = "badge b-confirmed"
+    If s="cancelled" Then BadgeClass = "badge b-cancelled"
+    If s="completed" Then BadgeClass = "badge b-completed"
+End Function
+
+Function CanConfirm(st): CanConfirm = (LCase(Trim(st&""))="pending"): End Function
+Function CanCancel(st)
+    Dim s: s=LCase(Trim(st&""))
+    CanCancel = (s="pending" Or s="confirmed")
+End Function
+Function CanComplete(st): CanComplete = (LCase(Trim(st&""))="confirmed"): End Function
+
+' Build back url to return after update
+Dim backUrl
+backUrl = ROOT & "/admin/reservations.asp"
+If Trim(Request.QueryString & "") <> "" Then backUrl = backUrl & "?" & Request.QueryString
+Dim backEnc: backEnc = Server.URLEncode(backUrl)
 %>
 
 <!DOCTYPE html>
@@ -109,10 +100,12 @@ On Error GoTo 0
     .nav a{margin-left:10px;text-decoration:none;color:#333;padding:8px 10px;border-radius:10px;background:#eee}
     .nav a.primary{background:#e63946;color:#fff}
     .card{background:#fff;border:1px solid #eee;border-radius:14px;box-shadow:0 10px 22px rgba(0,0,0,.06);padding:14px}
-    .filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
-    .filters input,.filters select{padding:10px 12px;border:1px solid #ddd;border-radius:10px;font-size:14px}
-    .filters button{padding:10px 14px;border:0;border-radius:10px;background:#111;color:#fff;font-weight:700;cursor:pointer}
-    table{width:100%;border-collapse:collapse}
+    .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+    .f{display:flex;flex-direction:column;gap:6px}
+    label{font-size:12px;color:#666}
+    input,select{padding:10px 12px;border:1px solid #ddd;border-radius:10px;min-width:160px}
+    button{padding:10px 12px;border:0;border-radius:10px;background:#111;color:#fff;font-weight:700;cursor:pointer}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
     th,td{padding:10px;border-bottom:1px solid #eee;text-align:left;font-size:14px;vertical-align:top}
     th{background:#fafafa;font-size:13px;color:#555}
     .badge{display:inline-block;padding:4px 10px;border-radius:999px;font-size:12px;background:#eee}
@@ -120,45 +113,83 @@ On Error GoTo 0
     .b-confirmed{background:#d9f2e6}
     .b-cancelled{background:#ffe1e1}
     .b-completed{background:#e6ecff}
-    .actions a{display:inline-block;margin-right:6px;text-decoration:none;padding:6px 10px;border-radius:10px;background:#eee;color:#111;font-size:13px}
+    .acts a{display:inline-block;margin-right:8px;text-decoration:none;padding:6px 10px;border-radius:10px;background:#111;color:#fff;font-weight:700;font-size:12px}
+    .acts a.gray{background:#888}
+    .acts a.disabled{background:#ddd;color:#666;pointer-events:none}
+    .muted{color:#777;font-size:12px}
   </style>
 </head>
-
 <body>
 <div class="wrap">
   <div class="topbar">
-    <div class="brand"><a href="<%=ROOT%>/index.asp">🍽 DoAnDatBan</a> / Quản trị</div>
+    <div class="brand">
+      <a href="<%=ROOT%>/index.asp">🍽 DoAnDatBan</a> / Admin / <b>Đơn đặt bàn</b>
+    </div>
+
     <div class="nav">
-      <span style="color:#666;font-size:13px;">Xin chào, <b><%=Server.HTMLEncode(Session("AdminFullName") & "")%></b></span>
-      <a href="<%=ROOT%>/datban.asp">Trang đặt bàn</a>
+      <span class="muted">Xin chào, <b><%=HE(Session("AdminFullName"))%></b></span>
+      <a href="<%=ROOT%>/admin/areas.asp">Khu</a>
+      <a href="<%=ROOT%>/admin/tables.asp">Bàn</a>
+      <a href="<%=ROOT%>/admin/reservations.asp">Đơn</a>
       <a class="primary" href="<%=ROOT%>/admin/logout.asp">Đăng xuất</a>
     </div>
   </div>
 
+
   <div class="card">
-    <form class="filters" method="get" action="reservations.asp">
-      <input type="text" name="q" placeholder="Tìm SĐT hoặc tên..." value="<%=Server.HTMLEncode(q)%>">
-      <input type="date" name="date" value="<%=Server.HTMLEncode(d)%>">
-      <select name="status">
-        <option value="">-- Tất cả trạng thái --</option>
-        <option value="pending"   <% If LCase(status)="pending" Then Response.Write("selected") %>>Pending</option>
-        <option value="confirmed" <% If LCase(status)="confirmed" Then Response.Write("selected") %>>Confirmed</option>
-        <option value="cancelled" <% If LCase(status)="cancelled" Then Response.Write("selected") %>>Cancelled</option>
-        <option value="completed" <% If LCase(status)="completed" Then Response.Write("selected") %>>Completed</option>
-      </select>
-      <button type="submit">Lọc</button>
+    <h2 style="margin:0 0 10px 0;">Danh sách đơn đặt bàn</h2>
+
+    <form method="get" action="<%=ROOT%>/admin/reservations.asp" class="filters">
+      <div class="f">
+        <label>Ngày (yyyy-mm-dd)</label>
+        <input name="d" value="<%=HE(fDate)%>" placeholder="2026-01-02" />
+      </div>
+
+      <div class="f">
+        <label>Trạng thái</label>
+        <select name="st">
+          <option value="" <% If fStatus="" Then Response.Write "selected" %> >Tất cả</option>
+          <option value="Pending"   <% If LCase(fStatus)="pending" Then Response.Write "selected" %> >Pending</option>
+          <option value="Confirmed" <% If LCase(fStatus)="confirmed" Then Response.Write "selected" %> >Confirmed</option>
+          <option value="Cancelled" <% If LCase(fStatus)="cancelled" Then Response.Write "selected" %> >Cancelled</option>
+          <option value="Completed" <% If LCase(fStatus)="completed" Then Response.Write "selected" %> >Completed</option>
+        </select>
+      </div>
+
+      <div class="f">
+        <label>Khung giờ</label>
+        <select name="slot">
+          <option value="0" <% If slotId=0 Then Response.Write "selected" %> >Tất cả</option>
+          <%
+          Do While Not rsSlots.EOF
+            Dim sid, sname
+            sid = CLng(rsSlots("SlotId"))
+            sname = rsSlots("SlotName") & ""
+          %>
+            <option value="<%=sid%>" <% If slotId=sid Then Response.Write "selected" %> ><%=HE(sname)%></option>
+          <%
+            rsSlots.MoveNext
+          Loop
+          rsSlots.Close : Set rsSlots = Nothing
+          %>
+        </select>
+      </div>
+
+      <div class="f">
+        <button type="submit">Lọc</button>
+      </div>
     </form>
 
     <table>
       <thead>
         <tr>
-          <th>ID</th>
+          <th>#</th>
           <th>Khách</th>
-          <th>Liên hệ</th>
           <th>Ngày / Giờ</th>
+          <th>SĐT</th>
           <th>Số khách</th>
+          <th>Khu / Bàn</th>
           <th>Trạng thái</th>
-          <th>Tạo lúc</th>
           <th>Thao tác</th>
         </tr>
       </thead>
@@ -166,37 +197,56 @@ On Error GoTo 0
       <%
       If rs.EOF Then
       %>
-        <tr><td colspan="8" style="color:#666;">Không có dữ liệu phù hợp bộ lọc.</td></tr>
+        <tr><td colspan="8" class="muted">Không có dữ liệu.</td></tr>
       <%
       Else
         Do While Not rs.EOF
-          Dim st, badgeClass
-          st = LCase(rs("Status") & "")
-          badgeClass = "badge"
-          If st="pending" Then badgeClass = badgeClass & " b-pending"
-          If st="confirmed" Then badgeClass = badgeClass & " b-confirmed"
-          If st="cancelled" Then badgeClass = badgeClass & " b-cancelled"
-          If st="completed" Then badgeClass = badgeClass & " b-completed"
+          Dim rid, st, areaName, tableName, cap, slotName, rdate
+          rid = CLng(rs("ReservationId"))
+          st  = rs("Status") & ""
+          areaName = rs("AreaName") & ""
+          tableName = rs("TableName") & ""
+          cap = rs("Capacity") & ""
+          slotName = rs("SlotName") & ""
+          rdate = rs("ReservationDate") & ""
+
+          Dim viewUrl
+          viewUrl = ROOT & "/admin/reservation_view.asp?id=" & rid
       %>
         <tr>
-          <td><%=rs("ReservationId")%></td>
-          <td><%=Server.HTMLEncode(rs("FullName") & "")%></td>
+          <td><b><%=rid%></b></td>
           <td>
-            <div><b>SĐT:</b> <%=Server.HTMLEncode(rs("Phone") & "")%></div>
-            <div><b>Email:</b> <%=Server.HTMLEncode(rs("Email") & "")%></div>
+            <div><%=HE(rs("FullName"))%></div>
+            <div class="muted"><%=HE(rs("Email"))%></div>
           </td>
+          <td><%=HE(rdate)%><br><span class="muted"><%=HE(slotName)%></span></td>
+          <td><%=HE(rs("Phone"))%></td>
+          <td><%=HE(rs("Guests"))%></td>
           <td>
-            <div><b><%=rs("ReservationDate")%></b></div>
-            <div><%=Server.HTMLEncode(rs("SlotName") & "")%></div>
+            <div><b><%=HE(areaName)%></b></div>
+            <div class="muted"><%=HE(tableName)%> (Cap: <%=HE(cap)%>)</div>
           </td>
-          <td><%=rs("Guests")%></td>
-          <td><span class="<%=badgeClass%>"><%=Server.HTMLEncode(rs("Status") & "")%></span></td>
-          <td><%=rs("CreatedAt")%></td>
-          <td class="actions">
-            <a href="<%=ROOT%>/admin/reservation_view.asp?id=<%=rs("ReservationId")%>">Xem</a>
-            <a href="<%=ROOT%>/admin/reservation_update.asp?id=<%=rs("ReservationId")%>&action=confirm">Confirm</a>
-            <a href="<%=ROOT%>/admin/reservation_update.asp?id=<%=rs("ReservationId")%>&action=cancel">Cancel</a>
-            <a href="<%=ROOT%>/admin/reservation_update.asp?id=<%=rs("ReservationId")%>&action=complete">Complete</a>
+          <td><span class="<%=BadgeClass(st)%>"><%=HE(st)%></span></td>
+          <td class="acts">
+            <a href="<%=viewUrl%>">Xem</a>
+
+            <% If CanConfirm(st) Then %>
+              <a href="<%=ROOT%>/admin/reservation_update.asp?id=<%=rid%>&action=confirm&back=<%=backEnc%>">Confirm</a>
+            <% Else %>
+              <a class="disabled" href="javascript:void(0)">Confirm</a>
+            <% End If %>
+
+            <% If CanCancel(st) Then %>
+              <a class="gray" href="<%=ROOT%>/admin/reservation_update.asp?id=<%=rid%>&action=cancel&back=<%=backEnc%>">Cancel</a>
+            <% Else %>
+              <a class="disabled" href="javascript:void(0)">Cancel</a>
+            <% End If %>
+
+            <% If CanComplete(st) Then %>
+              <a href="<%=ROOT%>/admin/reservation_update.asp?id=<%=rid%>&action=complete&back=<%=backEnc%>">Complete</a>
+            <% Else %>
+              <a class="disabled" href="javascript:void(0)">Complete</a>
+            <% End If %>
           </td>
         </tr>
       <%
@@ -209,6 +259,8 @@ On Error GoTo 0
       %>
       </tbody>
     </table>
+
+    <div class="muted" style="margin-top:10px;">Hiển thị tối đa 200 dòng (mới nhất).</div>
   </div>
 </div>
 </body>

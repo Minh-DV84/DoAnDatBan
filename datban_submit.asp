@@ -2,10 +2,9 @@
 Response.CodePage = 65001
 Response.Charset  = "utf-8"
 
-' ROOT đặt ngay đây vì submit không include header
-Const ROOT = "/DoAnDatBan"
 %>
-
+<!--#include file="includes/config.asp" -->
+<!--#include file="includes/header.asp" -->
 <!--#include file="includes/functions.asp" -->
 <!--#include file="includes/connect.asp" -->
 
@@ -94,81 +93,70 @@ rsCheck.Close : Set rsCheck = Nothing
 Set cmdCheck = Nothing
 
 
-' ===== INSERT RESERVATION (1 lần duy nhất) =====
+' ===== GỌI SP: tạo đơn + gán bàn (Rule 1) =====
+Function ToDateISO(s)
+    Dim p
+    s = Trim(s & "")
+    p = Split(s, "-")
+    ' yyyy-mm-dd
+    ToDateISO = DateSerial(CInt(p(0)), CInt(p(1)), CInt(p(2)))
+End Function
+
+Dim cmdSP, rsSP, resultCode, newId
+Set cmdSP = Server.CreateObject("ADODB.Command")
+Set cmdSP.ActiveConnection = conn
+cmdSP.CommandType = 4 ' adCmdStoredProc
+cmdSP.CommandText = "dbo.sp_CreateReservationAndAssignTable"
+
+' Null hóa Email/Note
 Dim emailVal, noteVal
 If Trim(email & "") = "" Then emailVal = Null Else emailVal = email End If
 If Trim(note & "") = "" Then noteVal = Null Else noteVal = note End If
 
-Dim cmd, sqlInsert
-Set cmd = Server.CreateObject("ADODB.Command")
-Set cmd.ActiveConnection = conn
-cmd.CommandType = 1
+cmdSP.Parameters.Append cmdSP.CreateParameter("@FullName", 202, 1, 100, fullName)
+cmdSP.Parameters.Append cmdSP.CreateParameter("@Phone",    202, 1, 20,  phone)
+cmdSP.Parameters.Append cmdSP.CreateParameter("@Email",    202, 1, 254, emailVal)
+cmdSP.Parameters.Append cmdSP.CreateParameter("@Guests",   3,   1, , CLng(guests))
 
-sqlInsert = ""
-sqlInsert = sqlInsert & "INSERT INTO dbo.Reservations "
-sqlInsert = sqlInsert & "(FullName, Email, Phone, Guests, ReservationDate, SlotId, Note, Status, SourceIP, UserAgent) "
-sqlInsert = sqlInsert & "VALUES (?, ?, ?, ?, CONVERT(date, ?, 23), ?, ?, N'Pending', ?, ?);"
+' DATE (an toàn theo yyyy-mm-dd)
+cmdSP.Parameters.Append cmdSP.CreateParameter("@ReservationDate", 133, 1, , ToDateISO(reservationDate))
 
-cmd.CommandText = sqlInsert
-
-cmd.Parameters.Append cmd.CreateParameter("@FullName", 202, 1, 100, fullName)
-cmd.Parameters.Append cmd.CreateParameter("@Email", 202, 1, 254, emailVal)
-cmd.Parameters.Append cmd.CreateParameter("@Phone", 202, 1, 20, phone)
-cmd.Parameters.Append cmd.CreateParameter("@Guests", 3, 1, , CLng(guests))
-cmd.Parameters.Append cmd.CreateParameter("@ReservationDate", 202, 1, 10, reservationDate)
-cmd.Parameters.Append cmd.CreateParameter("@SlotId", 3, 1, , CLng(slotId))
-cmd.Parameters.Append cmd.CreateParameter("@Note", 202, 1, 500, noteVal)
-cmd.Parameters.Append cmd.CreateParameter("@SourceIP", 202, 1, 45, Request.ServerVariables("REMOTE_ADDR"))
-cmd.Parameters.Append cmd.CreateParameter("@UserAgent", 202, 1, 300, Left(Request.ServerVariables("HTTP_USER_AGENT") & "", 300))
+cmdSP.Parameters.Append cmdSP.CreateParameter("@SlotId",   3,   1, , CLng(slotId))
+cmdSP.Parameters.Append cmdSP.CreateParameter("@Note",     202, 1, 500, noteVal)
+cmdSP.Parameters.Append cmdSP.CreateParameter("@SourceIP", 202, 1, 45,  Request.ServerVariables("REMOTE_ADDR"))
+cmdSP.Parameters.Append cmdSP.CreateParameter("@UserAgent",202, 1, 300, Left(Request.ServerVariables("HTTP_USER_AGENT") & "", 300))
 
 On Error Resume Next
-cmd.Execute , , 129   ' adExecuteNoRecords
-
+Set rsSP = cmdSP.Execute
 If Err.Number <> 0 Then
-    Dim errText
-    errText = LCase(Err.Description & "")
     On Error GoTo 0
-
     conn.Close : Set conn = Nothing
-
-    If InStr(errText, "duplicate") > 0 Or InStr(errText, "unique") > 0 Then
-        Response.Redirect ROOT & "/datban.asp?err=duplicate"
-    Else
-        Response.Redirect ROOT & "/datban.asp?err=server"
-    End If
+    Response.Redirect ROOT & "/datban.asp?err=server"
     Response.End
 End If
 On Error GoTo 0
 
-
-' ===== LẤY ID VỪA TẠO (cách chắc chắn theo unique combo) =====
-Dim cmdGet, rsGet, newId
-Set cmdGet = Server.CreateObject("ADODB.Command")
-Set cmdGet.ActiveConnection = conn
-cmdGet.CommandType = 1
-
-cmdGet.CommandText = "SELECT TOP 1 ReservationId " & _
-                     "FROM dbo.Reservations " & _
-                     "WHERE Phone=? AND ReservationDate=CONVERT(date, ?, 23) AND SlotId=? " & _
-                     "ORDER BY ReservationId DESC;"
-
-cmdGet.Parameters.Append cmdGet.CreateParameter("@Phone", 202, 1, 20, phone)
-cmdGet.Parameters.Append cmdGet.CreateParameter("@ReservationDate", 202, 1, 10, reservationDate)
-cmdGet.Parameters.Append cmdGet.CreateParameter("@SlotId", 3, 1, , CLng(slotId))
-
-Set rsGet = cmdGet.Execute
-
+resultCode = -1
 newId = 0
-If Not rsGet.EOF Then newId = CLng(rsGet("ReservationId"))
-
-rsGet.Close : Set rsGet = Nothing
-Set cmdGet = Nothing
+If Not rsSP Is Nothing Then
+    If Not rsSP.EOF Then
+        resultCode = CLng(rsSP("ResultCode"))
+        If Not IsNull(rsSP("ReservationId")) Then newId = CLng(rsSP("ReservationId"))
+    End If
+    rsSP.Close : Set rsSP = Nothing
+End If
 
 conn.Close : Set conn = Nothing
 
-If newId > 0 Then
-    Response.Redirect ROOT & "/xacnhan.asp?id=" & newId
-Else
-    Response.Redirect ROOT & "/datban.asp?err=server"
-End If
+Select Case resultCode
+    Case 0
+        Response.Redirect ROOT & "/xacnhan.asp?id=" & newId
+    Case 1
+        Response.Redirect ROOT & "/datban.asp?err=capacity_full"
+    Case 2
+        Response.Redirect ROOT & "/datban.asp?err=too_large"
+    Case Else
+        Response.Redirect ROOT & "/datban.asp?err=server"
+End Select
+Response.End
 %>

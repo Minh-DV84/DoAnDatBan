@@ -2,7 +2,7 @@
 <!--#include file="includes/functions.asp" -->
 <!--#include file="includes/connect.asp" -->
 <!--#include file="includes/header.asp" -->
-
+<!--#include file="includes/config.asp" -->
 <%
 ' ===== đọc lỗi từ querystring =====
 Dim errCode, errMsg

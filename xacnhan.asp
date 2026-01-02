@@ -1,4 +1,8 @@
-
+<%
+Response.CodePage = 65001
+Response.Charset  = "utf-8"
+%>
+<!--#include file="includes/config.asp" -->
 <!--#include file="includes/functions.asp" -->
 <!--#include file="includes/connect.asp" -->
 <!--#include file="includes/header.asp" -->
@@ -32,14 +36,18 @@ Set cmd.ActiveConnection = conn
 sql = ""
 sql = sql & "SELECT r.ReservationId, r.FullName, r.Phone, r.Email, r.Guests, "
 sql = sql & "       r.ReservationDate, r.Note, r.Status, r.CreatedAt, "
-sql = sql & "       ts.SlotName "
+sql = sql & "       ts.SlotName, a.AreaName, t.TableName, t.Capacity "
 sql = sql & "FROM dbo.Reservations r "
-sql = sql & "INNER JOIN dbo.TimeSlots ts ON r.SlotId = ts.SlotId "
-sql = sql & "WHERE r.ReservationId = ?;"
+sql = sql & "LEFT JOIN dbo.TimeSlots ts ON ts.SlotId = r.SlotId "
+sql = sql & "LEFT JOIN dbo.ReservationTables rt ON rt.ReservationId = r.ReservationId "
+sql = sql & "LEFT JOIN dbo.DiningTables t ON t.TableId = rt.TableId "
+sql = sql & "LEFT JOIN dbo.Areas a ON a.AreaId = t.AreaId "
+sql = sql & "WHERE r.ReservationId = CAST(? AS BIGINT);"
+
 
 cmd.CommandText = sql
 cmd.CommandType = 1 ' adCmdText
-cmd.Parameters.Append cmd.CreateParameter("@Id", 3, 1, , CLng(id))
+cmd.Parameters.Append cmd.CreateParameter("@Id", 20, 1, , CLng(id))
 
 Set rs = cmd.Execute
 
@@ -58,6 +66,8 @@ If rs.EOF Then
 End If
 
 Dim fullName, phone, email, guests, rDate, slotName, note, status, createdAt
+Dim areaName, tableName, capacity
+
 fullName = rs("FullName") & ""
 phone    = rs("Phone") & ""
 email    = rs("Email") & ""
@@ -67,6 +77,11 @@ slotName = rs("SlotName") & ""
 note     = rs("Note") & ""
 status   = rs("Status") & ""
 createdAt= rs("CreatedAt")
+
+areaName = rs("AreaName") & ""
+tableName= rs("TableName") & ""
+capacity = rs("Capacity") & ""
+
 
 rs.Close : Set rs = Nothing
 conn.Close : Set conn = Nothing
@@ -145,6 +160,17 @@ conn.Close : Set conn = Nothing
         <div class="k">Khung giờ</div>
         <div class="v"><%= HtmlEncode(slotName) %></div>
     </div>
+    
+    <div class="row">
+        <div class="k">Khu</div>
+        <div class="v"><%= HtmlEncode(areaName) %></div>
+    </div>
+    <div class="row">
+        <div class="k">Bàn</div>
+        <div class="v"><%= HtmlEncode(tableName) %> (Sức chứa: <%= HtmlEncode(CStr(capacity)) %>)</div>
+    </div>
+
+
     <div class="row">
         <div class="k">Số khách</div>
         <div class="v"><%= guests %></div>

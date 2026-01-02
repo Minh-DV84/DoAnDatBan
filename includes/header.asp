@@ -3,10 +3,7 @@ Response.CodePage = 65001
 Response.Charset = "utf-8"
 %>
 
-<%
-Dim ROOT
-ROOT = "/DoAnDatBan"
-%>
+
 
 <!DOCTYPE html>
 <html lang="vi">

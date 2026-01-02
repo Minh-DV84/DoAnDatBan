@@ -1,291 +1,174 @@
 <%
-Response.Buffer = True
 Response.CodePage = 65001
 Response.Charset  = "utf-8"
-
 %>
 <!--#include file="../includes/config.asp" -->
 <!--#include file="_auth.asp" -->
 <!--#include file="../includes/connect.asp" -->
 
 <%
-' ==========================================================
-' admin/reservation_update.asp
-' - action=confirm | cancel | complete
-' - GET: ?id=123&action=confirm
-' - Update Reservations + (optional) insert history
-' ==========================================================
-
-' --- Helpers ---
-Function IsNumericId(v)
-    v = Trim(v & "")
-    If v = "" Then IsNumericId = False : Exit Function
-    IsNumericId = IsNumeric(v)
-End Function
-
-Function HasCol(dict, colLower)
-    HasCol = False
-    If Not dict Is Nothing Then
-        If dict.Exists(LCase(colLower)) Then HasCol = True
+Function AppendParam(url, key, val)
+    If InStr(url, "?") > 0 Then
+        AppendParam = url & "&" & key & "=" & Server.URLEncode(val)
+    Else
+        AppendParam = url & "?" & key & "=" & Server.URLEncode(val)
     End If
 End Function
 
-' --- Input ---
-Dim idStr, action, rid
+' ---- read inputs
+Dim idStr, rid, action, back
 idStr = Trim(Request.QueryString("id") & "")
 action = LCase(Trim(Request.QueryString("action") & ""))
+back = Trim(Request.QueryString("back") & "")
 
-If Not IsNumericId(idStr) Then
+If idStr="" Or Not IsNumeric(idStr) Then
+    conn.Close : Set conn = Nothing
     Response.Redirect ROOT & "/admin/reservations.asp?err=bad_id"
     Response.End
 End If
 rid = CLng(idStr)
 
-If action <> "confirm" And action <> "cancel" And action <> "complete" Then
-    Response.Redirect ROOT & "/admin/reservations.asp?err=bad_action"
+If back = "" Then back = ROOT & "/admin/reservations.asp"
+
+' tránh redirect ra ngoài site
+If Left(back, Len(ROOT)) <> ROOT Then back = ROOT & "/admin/reservations.asp"
+
+If action<>"confirm" And action<>"cancel" And action<>"complete" Then
+    conn.Close : Set conn = Nothing
+    Response.Redirect AppendParam(back, "err", "bad_action")
     Response.End
 End If
 
-' --- Read columns (Reservations + History) to avoid invalid column errors ---
-Dim colsRes, colsHist, rsCols, colName
-Set colsRes  = Server.CreateObject("Scripting.Dictionary")
-Set colsHist = Server.CreateObject("Scripting.Dictionary")
-
-' Reservations columns
-On Error Resume Next
-Set rsCols = conn.Execute( _
-    "SELECT LOWER(COLUMN_NAME) AS c FROM INFORMATION_SCHEMA.COLUMNS " & _
-    "WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='Reservations';" _
-)
-On Error GoTo 0
-If Not rsCols Is Nothing Then
-    Do While Not rsCols.EOF
-        colName = rsCols("c") & ""
-        If colName <> "" Then
-            If Not colsRes.Exists(colName) Then colsRes.Add colName, True
-        End If
-        rsCols.MoveNext
-    Loop
-    rsCols.Close : Set rsCols = Nothing
-End If
-
-' History columns (ReservationStatusHistory) - nếu bảng không tồn tại thì dict rỗng
-On Error Resume Next
-Set rsCols = conn.Execute( _
-    "SELECT LOWER(COLUMN_NAME) AS c FROM INFORMATION_SCHEMA.COLUMNS " & _
-    "WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='ReservationStatusHistory';" _
-)
-If Err.Number <> 0 Then Err.Clear
-On Error GoTo 0
-
-If Not rsCols Is Nothing Then
-    Do While Not rsCols.EOF
-        colName = rsCols("c") & ""
-        If colName <> "" Then
-            If Not colsHist.Exists(colName) Then colsHist.Add colName, True
-        End If
-        rsCols.MoveNext
-    Loop
-    rsCols.Close : Set rsCols = Nothing
-End If
-
-' --- Fetch current reservation ---
-Dim cmdGet, rsGet, curStatus
+' ---- load current status
+Dim cmdGet, rsGet, curStatus, curLower
 Set cmdGet = Server.CreateObject("ADODB.Command")
 Set cmdGet.ActiveConnection = conn
 cmdGet.CommandType = 1
-cmdGet.CommandText = "SELECT ReservationId, Status FROM dbo.Reservations WHERE ReservationId=?;"
-cmdGet.Parameters.Append cmdGet.CreateParameter("@Id", 3, 1, , rid)
+cmdGet.CommandText = "SELECT ReservationId, Status FROM dbo.Reservations WHERE ReservationId = CAST(? AS BIGINT);"
+cmdGet.Parameters.Append cmdGet.CreateParameter("@id", 20, 1, , rid) ' adBigInt
 
-On Error Resume Next
 Set rsGet = cmdGet.Execute
-If Err.Number <> 0 Then
-    Dim errDesc0
-    errDesc0 = Err.Description & ""
-    On Error GoTo 0
-    conn.Close : Set conn = Nothing
-    Response.Write "<h3>Lỗi đọc đơn đặt bàn</h3>"
-    Response.Write "<pre>" & Server.HTMLEncode(errDesc0) & "</pre>"
-    Response.End
-End If
-On Error GoTo 0
-
 If rsGet.EOF Then
     rsGet.Close : Set rsGet = Nothing
     conn.Close : Set conn = Nothing
-    Response.Redirect ROOT & "/admin/reservations.asp?err=not_found"
+    Response.Redirect AppendParam(back, "err", "not_found")
     Response.End
 End If
 
-curStatus = LCase(Trim(rsGet("Status") & ""))
+curStatus = rsGet("Status") & ""
+curLower  = LCase(Trim(curStatus))
+
 rsGet.Close : Set rsGet = Nothing
-Set cmdGet = Nothing
 
-' --- Validate transition ---
-Dim newStatus, okTransition
-okTransition = False
+' ---- validate transition
+Dim newStatus
+newStatus = ""
 
-If action = "confirm" Then
-    newStatus = "Confirmed"
-    If curStatus = "pending" Then okTransition = True
-End If
-
-If action = "cancel" Then
-    newStatus = "Cancelled"
-    If curStatus = "pending" Or curStatus = "confirmed" Then okTransition = True
-End If
-
-If action = "complete" Then
-    newStatus = "Completed"
-    If curStatus = "confirmed" Then okTransition = True
-End If
-
-If Not okTransition Then
-    conn.Close : Set conn = Nothing
-    Response.Redirect ROOT & "/admin/reservation_view.asp?id=" & rid & "&err=invalid_transition"
-    Response.End
-End If
-
-' --- Transaction ---
-On Error Resume Next
-conn.BeginTrans
-If Err.Number <> 0 Then Err.Clear
-On Error GoTo 0
-
-' --- Build UPDATE Reservations safely (only columns that exist) ---
-Dim setSql
-setSql = "Status=?"
-
-If HasCol(colsRes, "updatedat") Then
-    setSql = setSql & ", UpdatedAt=GETDATE()"
-End If
-
-If action = "confirm" And HasCol(colsRes, "confirmedat") Then
-    setSql = setSql & ", ConfirmedAt=GETDATE()"
-End If
-
-If action = "cancel" And HasCol(colsRes, "cancelledat") Then
-    setSql = setSql & ", CancelledAt=GETDATE()"
-End If
-
-If action = "complete" And HasCol(colsRes, "completedat") Then
-    setSql = setSql & ", CompletedAt=GETDATE()"
-End If
-
-Dim cmdUp
-Set cmdUp = Server.CreateObject("ADODB.Command")
-Set cmdUp.ActiveConnection = conn
-cmdUp.CommandType = 1
-cmdUp.CommandText = "UPDATE dbo.Reservations SET " & setSql & " WHERE ReservationId=?;"
-
-cmdUp.Parameters.Append cmdUp.CreateParameter("@Status", 202, 1, 20, newStatus)
-cmdUp.Parameters.Append cmdUp.CreateParameter("@Id", 3, 1, , rid)
-
-On Error Resume Next
-cmdUp.Execute , , 129
-If Err.Number <> 0 Then
-    Dim errDesc1
-    errDesc1 = Err.Description & ""
-    Err.Clear
-    conn.RollbackTrans
-    conn.Close : Set conn = Nothing
-    Response.Write "<h3>Lỗi cập nhật trạng thái</h3>"
-    Response.Write "<pre>" & Server.HTMLEncode(errDesc1) & "</pre>"
-    Response.End
-End If
-On Error GoTo 0
-
-Set cmdUp = Nothing
-
-' --- Insert history (nếu có bảng + cột cần thiết) ---
-' Expect columns: ReservationId, OldStatus, NewStatus, ChangedByAdminId, ChangedAt, Note (tuỳ)
-Dim canHist
-canHist = (HasCol(colsHist, "reservationid") And HasCol(colsHist, "oldstatus") And HasCol(colsHist, "newstatus"))
-
-If canHist Then
-    Dim colsIns, valsIns, cmdHist
-    colsIns = "ReservationId, OldStatus, NewStatus"
-    valsIns = "?, ?, ?"
-
-    If HasCol(colsHist, "changedbyadminid") Then
-        colsIns = colsIns & ", ChangedByAdminId"
-        valsIns = valsIns & ", ?"
-    End If
-
-    If HasCol(colsHist, "changedat") Then
-        colsIns = colsIns & ", ChangedAt"
-        valsIns = valsIns & ", GETDATE()"
-    End If
-
-    ' note optional (từ querystring hoặc form)
-    Dim note
-    note = Trim(Request.Form("note") & "")
-    If note = "" Then note = Trim(Request.QueryString("note") & "")
-
-    If HasCol(colsHist, "note") Then
-        colsIns = colsIns & ", Note"
-        valsIns = valsIns & ", ?"
-    End If
-
-    Set cmdHist = Server.CreateObject("ADODB.Command")
-    Set cmdHist.ActiveConnection = conn
-    cmdHist.CommandType = 1
-    cmdHist.CommandText = "INSERT INTO dbo.ReservationStatusHistory (" & colsIns & ") VALUES (" & valsIns & ");"
-
-    cmdHist.Parameters.Append cmdHist.CreateParameter("@ReservationId", 3, 1, , rid)
-    cmdHist.Parameters.Append cmdHist.CreateParameter("@OldStatus", 202, 1, 20, curStatus)
-    cmdHist.Parameters.Append cmdHist.CreateParameter("@NewStatus", 202, 1, 20, LCase(newStatus))
-
-    If HasCol(colsHist, "changedbyadminid") Then
-        cmdHist.Parameters.Append cmdHist.CreateParameter("@ChangedBy", 3, 1, , CLng(Session("AdminId")))
-    End If
-
-    If HasCol(colsHist, "note") Then
-        If Trim(note & "") = "" Then
-            cmdHist.Parameters.Append cmdHist.CreateParameter("@Note", 202, 1, 500, Null)
-        Else
-            cmdHist.Parameters.Append cmdHist.CreateParameter("@Note", 202, 1, 500, note)
-        End If
-    End If
-
-    On Error Resume Next
-    cmdHist.Execute , , 129
-    If Err.Number <> 0 Then
-        ' Nếu history fail thì rollback để dữ liệu đồng bộ
-        Dim errDesc2
-        errDesc2 = Err.Description & ""
-        Err.Clear
-        conn.RollbackTrans
+If action="confirm" Then
+    If curLower <> "pending" Then
         conn.Close : Set conn = Nothing
-        Response.Write "<h3>Lỗi ghi lịch sử trạng thái</h3>"
-        Response.Write "<pre>" & Server.HTMLEncode(errDesc2) & "</pre>"
+        Response.Redirect AppendParam(back, "err", "invalid_transition")
         Response.End
     End If
-    On Error GoTo 0
-
-    Set cmdHist = Nothing
+    newStatus = "Confirmed"
 End If
 
-' --- Commit ---
+If action="cancel" Then
+    If Not (curLower="pending" Or curLower="confirmed") Then
+        conn.Close : Set conn = Nothing
+        Response.Redirect AppendParam(back, "err", "invalid_transition")
+        Response.End
+    End If
+    newStatus = "Cancelled"
+End If
+
+If action="complete" Then
+    If curLower <> "confirmed" Then
+        conn.Close : Set conn = Nothing
+        Response.Redirect AppendParam(back, "err", "invalid_transition")
+        Response.End
+    End If
+    newStatus = "Completed"
+End If
+
+' ---- detect optional columns to update timestamps safely
+Dim cols, rsCols, c
+Set cols = Server.CreateObject("Scripting.Dictionary")
+Set rsCols = conn.Execute( _
+  "SELECT LOWER(COLUMN_NAME) AS c " & _
+  "FROM INFORMATION_SCHEMA.COLUMNS " & _
+  "WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='Reservations';" _
+)
+Do While Not rsCols.EOF
+  c = rsCols("c") & ""
+  If c<>"" Then If Not cols.Exists(c) Then cols.Add c, True
+  rsCols.MoveNext
+Loop
+rsCols.Close : Set rsCols = Nothing
+
+Dim sqlUpd
+sqlUpd = "UPDATE dbo.Reservations SET Status = ?"
+
+If cols.Exists("updatedat") Then
+  sqlUpd = sqlUpd & ", UpdatedAt = SYSDATETIME()"
+End If
+
+If newStatus="Confirmed" And cols.Exists("confirmedat") Then
+  sqlUpd = sqlUpd & ", ConfirmedAt = SYSDATETIME()"
+End If
+
+If newStatus="Cancelled" And cols.Exists("cancelledat") Then
+  sqlUpd = sqlUpd & ", CancelledAt = SYSDATETIME()"
+End If
+
+If newStatus="Completed" And cols.Exists("completedat") Then
+  sqlUpd = sqlUpd & ", CompletedAt = SYSDATETIME()"
+End If
+
+sqlUpd = sqlUpd & " WHERE ReservationId = CAST(? AS BIGINT);"
+
+Dim cmdUpd
+Set cmdUpd = Server.CreateObject("ADODB.Command")
+Set cmdUpd.ActiveConnection = conn
+cmdUpd.CommandType = 1
+cmdUpd.CommandText = sqlUpd
+cmdUpd.Parameters.Append cmdUpd.CreateParameter("@st", 202, 1, 20, newStatus)
+cmdUpd.Parameters.Append cmdUpd.CreateParameter("@id", 20, 1, , rid)
+
 On Error Resume Next
-conn.CommitTrans
+cmdUpd.Execute , , 129 ' adExecuteNoRecords
 If Err.Number <> 0 Then
-    Dim errDesc3
-    errDesc3 = Err.Description & ""
-    Err.Clear
-    conn.RollbackTrans
+    On Error GoTo 0
     conn.Close : Set conn = Nothing
-    Response.Write "<h3>Lỗi Commit giao dịch</h3>"
-    Response.Write "<pre>" & Server.HTMLEncode(errDesc3) & "</pre>"
+    Response.Redirect AppendParam(back, "err", "server")
     Response.End
 End If
 On Error GoTo 0
+
+' (Tuỳ chọn) ghi ReservationStatusHistory nếu có bảng
+Dim hasHist
+hasHist = False
+On Error Resume Next
+Dim rsH
+Set rsH = conn.Execute("SELECT TOP 1 1 AS X FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='ReservationStatusHistory';")
+If Err.Number = 0 Then
+    If Not rsH.EOF Then hasHist = True
+End If
+Err.Clear
+On Error GoTo 0
+If Not rsH Is Nothing Then rsH.Close : Set rsH = Nothing
+
+If hasHist Then
+    ' Insert đơn giản (nếu cột thiếu thì bạn có thể bỏ qua)
+    On Error Resume Next
+    conn.Execute "INSERT INTO dbo.ReservationStatusHistory(ReservationId, OldStatus, NewStatus, ChangedByAdminId, ChangedAt) " & _
+                 "VALUES (" & rid & ", N'" & Replace(curStatus,"'","''") & "', N'" & Replace(newStatus,"'","''") & "', " & CLng(Session("AdminId")) & ", SYSDATETIME());"
+    Err.Clear
+    On Error GoTo 0
+End If
 
 conn.Close : Set conn = Nothing
 
-' Redirect back
-Response.Clear
-Response.Redirect ROOT & "/admin/reservation_view.asp?id=" & rid & "&ok=" & action
+Response.Redirect AppendParam(back, "ok", action)
 Response.End
-
 %>
