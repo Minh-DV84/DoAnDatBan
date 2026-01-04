@@ -150,11 +150,28 @@ conn.Close : Set conn = Nothing
 
 Select Case resultCode
     Case 0
+        ' Có bàn => qua xác nhận bình thường
         Response.Redirect ROOT & "/xacnhan.asp?id=" & newId
+
     Case 1
-        Response.Redirect ROOT & "/datban.asp?err=capacity_full"
+        ' Hết bàn phù hợp:
+        ' ✅ Nếu SP của bạn có tạo đơn và trả ReservationId => qua xác nhận để hiện "sẽ liên hệ lại sau"
+        ' ❗ Nếu newId = 0 (SP không tạo đơn) thì quay về datban báo lỗi như cũ
+        If newId > 0 Then
+            Response.Redirect ROOT & "/xacnhan.asp?id=" & newId
+        Else
+            Response.Redirect ROOT & "/datban.asp?err=capacity_full"
+        End If
+
     Case 2
-        Response.Redirect ROOT & "/datban.asp?err=too_large"
+        ' Quá sức chứa:
+        ' ✅ SP của bạn (bản đã sửa) có tạo đơn nhưng không gán bàn => qua xác nhận để hiện "sẽ liên hệ lại sau"
+        If newId > 0 Then
+            Response.Redirect ROOT & "/xacnhan.asp?id=" & newId
+        Else
+            Response.Redirect ROOT & "/datban.asp?err=too_large"
+        End If
+
     Case Else
         Response.Redirect ROOT & "/datban.asp?err=server"
 End Select

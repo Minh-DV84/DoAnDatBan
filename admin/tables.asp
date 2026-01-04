@@ -2,7 +2,6 @@
 Response.CodePage = 65001
 Response.Charset  = "utf-8"
 %>
-<!--#include file="../includes/config.asp" -->
 <!--#include file="_auth.asp" -->
 <!--#include file="../includes/connect.asp" -->
 <%
@@ -83,7 +82,15 @@ msg = Trim(Request.QueryString("msg") & "")
 <body>
 <div class="wrap">
   <div class="top">
-    <div><b>🍽 DoAnDatBan</b> / Admin / <a href="<%=ROOT%>/admin/reservations.asp">Đơn</a> / <b>Bàn</b></div>
+    <div>
+  <a href="<%=ROOT%>/admin/reservations.asp" style="text-decoration:none;font-weight:900;color:#111;">
+    Nhà hàng Lửa &amp; Lá
+  </a>
+  / <a href="<%=ROOT%>/admin/reservations.asp" style="text-decoration:none;color:#111;">Admin</a>
+  / <a href="<%=ROOT%>/admin/reservations.asp">Đơn</a>
+  / <b>Bàn</b>
+</div>
+
     <div>
       <a class="btn gray" href="<%=ROOT%>/admin/areas.asp">Quản lý Khu</a>
       <a class="btn" href="<%=ROOT%>/admin/logout.asp">Đăng xuất</a>

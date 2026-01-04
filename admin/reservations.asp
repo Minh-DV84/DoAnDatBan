@@ -2,7 +2,6 @@
 Response.CodePage = 65001
 Response.Charset  = "utf-8"
 %>
-<!--#include file="../includes/config.asp" -->
 <!--#include file="_auth.asp" -->
 <!--#include file="../includes/connect.asp" -->
 
@@ -123,7 +122,7 @@ Dim backEnc: backEnc = Server.URLEncode(backUrl)
 <div class="wrap">
   <div class="topbar">
     <div class="brand">
-      <a href="<%=ROOT%>/index.asp">🍽 DoAnDatBan</a> / Admin / <b>Đơn đặt bàn</b>
+      <a href="<%=ROOT%>/index.asp">Nhà hàng Lửa & Lá</a> / Admin / <b>Đơn đặt bàn</b>
     </div>
 
     <div class="nav">

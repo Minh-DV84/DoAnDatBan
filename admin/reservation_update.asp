@@ -2,7 +2,6 @@
 Response.CodePage = 65001
 Response.Charset  = "utf-8"
 %>
-<!--#include file="../includes/config.asp" -->
 <!--#include file="_auth.asp" -->
 <!--#include file="../includes/connect.asp" -->
 

@@ -1,7 +1,6 @@
 <%
 On Error Resume Next
 
-' Tạo conn nếu chưa có hoặc đang Nothing
 If (Not IsObject(conn)) Or (conn Is Nothing) Then
     Set conn = Server.CreateObject("ADODB.Connection")
 End If
@@ -11,20 +10,19 @@ If (conn Is Nothing) Then
     Response.End
 End If
 
-' Nếu đã mở rồi thì thôi
 If conn.State <> 1 Then
     Dim cs
-    cs = "Provider=SQLOLEDB;" & _
-         "Data Source=DESKTOP-VBLEOPD;" & _
+    cs = "Provider=MSOLEDBSQL;" & _
+         "Data Source=localhost;" & _
          "Initial Catalog=DoAnDatBan;" & _
          "User ID=sa;" & _
-         "Password=1234;"
+         "Password=son11111;" & _
+         "Encrypt=False;" & _
+         "TrustServerCertificate=True;"
 
-    ' Clear lỗi cũ trước khi open
     Err.Clear
     conn.Open cs
 
-    ' CHỈ kiểm tra State (tránh lỗi ảo do Err dính)
     If conn.State <> 1 Then
         Response.Write "<h3>Lỗi kết nối CSDL</h3>"
         Response.Write "<b>Err.Number:</b> " & Err.Number & "<br/>"

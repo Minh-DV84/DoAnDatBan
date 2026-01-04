@@ -11,6 +11,7 @@ Response.Charset  = "utf-8"
 ' ==========================================================
 ' xacnhan.asp
 ' - Hiển thị thông tin đơn đặt bàn theo id
+' - Nếu chưa gán bàn (quá sức chứa hoặc hết bàn phù hợp) => báo: "Đơn đã được gửi đến quản lý..."
 ' ==========================================================
 
 Dim id
@@ -44,7 +45,6 @@ sql = sql & "LEFT JOIN dbo.DiningTables t ON t.TableId = rt.TableId "
 sql = sql & "LEFT JOIN dbo.Areas a ON a.AreaId = t.AreaId "
 sql = sql & "WHERE r.ReservationId = CAST(? AS BIGINT);"
 
-
 cmd.CommandText = sql
 cmd.CommandType = 1 ' adCmdText
 cmd.Parameters.Append cmd.CreateParameter("@Id", 20, 1, , CLng(id))
@@ -67,6 +67,7 @@ End If
 
 Dim fullName, phone, email, guests, rDate, slotName, note, status, createdAt
 Dim areaName, tableName, capacity
+Dim needManual
 
 fullName = rs("FullName") & ""
 phone    = rs("Phone") & ""
@@ -82,6 +83,8 @@ areaName = rs("AreaName") & ""
 tableName= rs("TableName") & ""
 capacity = rs("Capacity") & ""
 
+' ✅ Nếu chưa có bàn => hoặc quá sức chứa, hoặc hết bàn phù hợp => báo chờ quản lý liên hệ
+needManual = (Trim(tableName) = "")
 
 rs.Close : Set rs = Nothing
 conn.Close : Set conn = Nothing
@@ -94,6 +97,17 @@ conn.Close : Set conn = Nothing
         padding:16px;
         border-radius:10px;
         margin: 0 0 16px 0;
+    }
+    .manual-box{
+        margin-top:10px;
+        background:#fff7ed;
+        border:1px solid #fed7aa;
+        padding:10px 12px;
+        border-radius:10px;
+        color:#9a3412;
+        font-size:14px;
+        line-height:1.5;
+        font-weight:600;
     }
     .summary{
         background:#fff;
@@ -111,7 +125,7 @@ conn.Close : Set conn = Nothing
     .row:last-child{ border-bottom:none; }
     .k{ width: 180px; color:#666; }
     .v{ flex:1; font-weight:600; }
-    .actions{ margin-top:14px; display:flex; gap:10px; }
+    .actions{ margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; }
     .btn{
         display:inline-block;
         padding:10px 14px;
@@ -134,9 +148,15 @@ conn.Close : Set conn = Nothing
 <div class="success-box">
     <div><strong>Đặt bàn thành công!</strong></div>
     <div>Mã đặt bàn của bạn: <strong>#<%= id %></strong></div>
-    <div style="color:#2b6a3b; margin-top:6px; font-size:14px;">
+    <div style="color:#2b6a2b; margin-top:6px; font-size:14px;">
         Trạng thái hiện tại: <strong><%= HtmlEncode(status) %></strong>
     </div>
+
+    <% If needManual Then %>
+        <div class="manual-box">
+            Đơn đã được gửi đến quản lý. <strong>Chúng tôi sẽ liên hệ lại sau…</strong>
+        </div>
+    <% End If %>
 </div>
 
 <div class="summary">
@@ -160,16 +180,17 @@ conn.Close : Set conn = Nothing
         <div class="k">Khung giờ</div>
         <div class="v"><%= HtmlEncode(slotName) %></div>
     </div>
-    
-    <div class="row">
-        <div class="k">Khu</div>
-        <div class="v"><%= HtmlEncode(areaName) %></div>
-    </div>
-    <div class="row">
-        <div class="k">Bàn</div>
-        <div class="v"><%= HtmlEncode(tableName) %> (Sức chứa: <%= HtmlEncode(CStr(capacity)) %>)</div>
-    </div>
 
+    <% If Not needManual Then %>
+        <div class="row">
+            <div class="k">Khu</div>
+            <div class="v"><%= HtmlEncode(areaName) %></div>
+        </div>
+        <div class="row">
+            <div class="k">Bàn</div>
+            <div class="v"><%= HtmlEncode(tableName) %> (Sức chứa: <%= HtmlEncode(CStr(capacity)) %>)</div>
+        </div>
+    <% End If %>
 
     <div class="row">
         <div class="k">Số khách</div>

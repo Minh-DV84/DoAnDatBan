@@ -17,6 +17,6 @@ Response.CacheControl = "no-cache"
 Response.AddHeader "Pragma", "no-cache"
 
 ' Về trang login
-Response.Redirect "/DoAnDatBan/admin/login.asp?ok=logged_out"
+Response.Redirect "/DoAnDatBan/index.asp"
 Response.End
 %>

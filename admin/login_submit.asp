@@ -32,7 +32,7 @@ sql = ""
 sql = sql & "SELECT TOP 1 AdminId, Username, DisplayName "
 sql = sql & "FROM dbo.AdminUsers "
 sql = sql & "WHERE Username=? AND IsActive=1 "
-sql = sql & "AND PasswordHash = HASHBYTES('SHA2_256', ? + CAST(PasswordSalt AS NVARCHAR(200)));"
+sql = sql & "AND PasswordHash = CONVERT(NVARCHAR(200), HASHBYTES('SHA2_256', ? + CAST(PasswordSalt AS NVARCHAR(200))), 2);"
 
 cmd.CommandText = sql
 cmd.Parameters.Append cmd.CreateParameter("@u", 202, 1, 50, username)
